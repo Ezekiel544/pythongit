@@ -318,7 +318,7 @@
           const ext = getExt(f.name);
           if (!SUPPORTED_EXTS.includes(ext)) return false;
           const parts = f.webkitRelativePath.split('/');
-          return !parts.some(p => SKIP_DIRS.has(p));
+          <!-- return !parts.some(p => SKIP_DIRS.has(p));
         });
         setFiles(codeFiles);
         if (codeFiles.length > 0) {
