@@ -71,7 +71,7 @@ def toggle_comment(filepath: Path, line_idx: int, comment_out: bool):
         # lines[line_idx] = line[:indent] + token + " " + line[indent:]
     else:
         stripped = line.lstrip()
-        new_stripped = stripped.split(" ", 1)[-1] if " " in stripped else stripped
+        # new_stripped = stripped.split(" ", 1)[-1] if " " in stripped else stripped
         indent = len(line) - len(stripped)
         lines[line_idx] = line[:indent] + new_stripped
 
