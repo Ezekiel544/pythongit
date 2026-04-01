@@ -148,7 +148,7 @@ def main():
 
     repo_path = str(Path(repo_path).resolve())
 
-    if not Path(repo_path, ".git").exists():
+    # if not Path(repo_path, ".git").exists():
         print(f"✗ No git repo found at: {repo_path}")
         sys.exit(1)
 
