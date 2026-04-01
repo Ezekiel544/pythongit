@@ -75,7 +75,7 @@ def toggle_comment(filepath: Path, line_idx: int, comment_out: bool):
         indent = len(line) - len(stripped)
         lines[line_idx] = line[:indent] + new_stripped
 
-    filepath.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # filepath.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def make_one_commit(repo_path: str, state: dict) -> bool:
