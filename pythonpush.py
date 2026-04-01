@@ -129,7 +129,7 @@ def push(repo_path: str):
     print("  📤 Pushing to GitHub...")
     code, out = run(["git", "push"], repo_path)
     if code == 0:
-        print("  ✅ Push successful!")
+        # print("  ✅ Push successful!")
     else:
         print(f"  ✗ Push failed: {out}")
 
