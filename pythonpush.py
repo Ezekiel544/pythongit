@@ -41,7 +41,7 @@ def run(cmd: list, cwd: str):
 
 def get_code_files(repo_path: str):
     files = []
-    for root, dirs, filenames in os.walk(repo_path):
+    # for root, dirs, filenames in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for f in filenames:
             p = Path(root) / f
