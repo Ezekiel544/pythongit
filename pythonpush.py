@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 git_pusher.py — Auto commit & push with comment toggling
-Usage: python3 git_pusher.py [--commits N] [--path /your/repo]
+Usage: python3 pythonpush.py --commits N
 """
 
 import os
@@ -13,23 +13,21 @@ from pathlib import Path
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-SUPPORTED_EXTENSIONS = [".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".swift", ".kt"]
+SUPPORTED_EXTENSIONS = [".py", ".js", ".ts", ".jsx", ".tsx", ".html"]
 
 COMMENT_TOKENS = {
     ".py": "#",
     ".js": "//", ".ts": "//", ".jsx": "//", ".tsx": "//",
-    ".java": "//", ".swift": "//", ".kt": "//"
+    ".html": "<!--"
 }
 
 COMMIT_MESSAGES = [
-    "refactor: minor code cleanup",
-    "chore: update comments for clarity",
+    "chore: minor code cleanup",
     "style: improve code readability",
-    "docs: update inline documentation",
+    "docs: update comments",
+    "refactor: small adjustments",
+    "chore: routine maintenance",
     "style: clean up formatting",
-    "refactor: code review adjustments",
-    "chore: housekeeping",
-    "fix: minor tweaks",
 ]
 
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".next"}
@@ -54,7 +52,7 @@ def get_code_files(repo_path: str):
 
 def get_toggleable_lines(filepath: Path):
     token = COMMENT_TOKENS.get(filepath.suffix, "//")
-    # lines = filepath.read_text(encoding="utf-8", errors="ignore").splitlines()
+    lines = filepath.read_text(encoding="utf-8", errors="ignore").splitlines()
     candidates = []
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -70,10 +68,10 @@ def toggle_comment(filepath: Path, line_idx: int, comment_out: bool):
 
     if comment_out:
         indent = len(line) - len(line.lstrip())
-        lines[line_idx] = line[:indent] + token + " " + line[indent:]
+        # lines[line_idx] = line[:indent] + token + " " + line[indent:]
     else:
         stripped = line.lstrip()
-        new_stripped = stripped.split(" ", 1)[-1] if " " in stripped else ""
+        new_stripped = stripped.split(" ", 1)[-1] if " " in stripped else stripped
         indent = len(line) - len(stripped)
         lines[line_idx] = line[:indent] + new_stripped
 
@@ -113,7 +111,6 @@ def make_one_commit(repo_path: str, state: dict) -> bool:
     action = "commented out" if not currently_commented else "uncommented"
     msg = random.choice(COMMIT_MESSAGES)
 
-    # Git operations
     code, out = run(["git", "add", rel_path], repo_path)
     if code != 0:
         print(f"  ✗ git add failed: {out}")
@@ -140,11 +137,14 @@ def push(repo_path: str):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    # Simple argument handling without argparse for now
-    commits = 6
+    commits = 55
     repo_path = "."
 
-    # You can improve this later with argparse if needed
+    if len(sys.argv) > 1:
+        try:
+            commits = int(sys.argv[2])   # --commits 55
+        except:
+            pass
 
     repo_path = str(Path(repo_path).resolve())
 
@@ -157,10 +157,9 @@ def main():
         print(f"✗ No supported code files found in repo.")
         sys.exit(1)
 
-    print(f"\n🚀 git_pusher starting")
-    print(f"   Repo   : {repo_path}")
-    print(f"   Commits: {commits}")
-    print(f"   Files  : {len(files)} code file(s) found\n")
+    print(f"\n🚀 Starting git pusher")
+    print(f"   Commits : {commits}")
+    print(f"   Files   : {len(files)} code file(s)\n")
 
     state = {}
     success = 0
@@ -170,14 +169,14 @@ def main():
         if make_one_commit(repo_path, state):
             success += 1
         if i < commits - 1:
-            time.sleep(2.0)
+            time.sleep(1.5)
 
     print(f"\n📊 {success}/{commits} commits made")
 
     if success > 0:
         push(repo_path)
     else:
-        # print("  ⚠️  Nothing to push.")
+        print("  ⚠️  Nothing to push.")
 
     print("\n✨ Done!\n")
 
