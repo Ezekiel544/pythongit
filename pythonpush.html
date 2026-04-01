@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>GitPusher </title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0f;
+      --surface: #111118;
+      --surface2: #1a1a24;
+      --border: #2a2a3a;
+      --border2: #3a3a50;
+      --accent: #7fff6e;
+      --accent2: #4dff3a;
+      --accent-dim: rgba(127,255,110,0.12);
+      --accent-glow: rgba(127,255,110,0.25);
+      --text: #e8e8f0;
+      --text2: #8888a8;
+      --text3: #55556a;
+      --red: #ff5555;
+      --amber: #ffb347;
+      --mono: 'Space Mono', monospace;
+      --sans: 'Syne', sans-serif;
+    }
+
+    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); }
+
+    #root { min-height: 100vh; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+    /* Animations */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pulse-ring {
+      0%   { box-shadow: 0 0 0 0 var(--accent-glow); }
+      70%  { box-shadow: 0 0 0 12px transparent; }
+      100% { box-shadow: 0 0 0 0 transparent; }
+    }
+    @keyframes slide-in {
+      from { opacity: 0; transform: translateX(-8px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0; }
+    }
+    @keyframes count-up {
+      from { opacity: 0; transform: scale(0.7); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    @keyframes scanline {
+      0%   { transform: translateY(-100%); }
+      100% { transform: translateY(100vh); }
+    }
+
+    .fade-up { animation: fadeUp 0.5s ease forwards; }
+
+    /* Grid background */
+    .grid-bg {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background-image:
+        linear-gradient(rgba(127,255,110,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(127,255,110,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+    .grid-bg::after {
+      content: '';
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse 60% 50% at 50% 0%, rgba(127,255,110,0.06) 0%, transparent 70%);
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    const SUPPORTED_EXTS = ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.swift', '.kt'];
+
+    const COMMIT_MESSAGES = [
+      'refactor: minor code cleanup',
+      'chore: update comments for clarity',
+      'style: improve code readability',
+      'refactor: simplify logic',
+      'chore: routine maintenance',
+      'docs: update inline documentation',
+      'style: clean up formatting',
+      'refactor: code review adjustments',
+      'chore: housekeeping',
+      'fix: minor tweaks',
+      'perf: small optimisation',
+      'test: update test comments',
+    ];
+
+    const COMMENT_TOKENS = {
+      '.py': '#', '.js': '//', '.ts': '//', '.jsx': '//',
+      '.tsx': '//', '.java': '//', '.swift': '//', '.kt': '//',
+    };
+
+    const SKIP_DIRS = new Set(['.git','node_modules','__pycache__','.venv','venv','dist','build','.next']);
+
+    function getExt(name) {
+      const i = name.lastIndexOf('.');
+      return i === -1 ? '' : name.slice(i);
+    }
+
+    function randomItem(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    async function getToggleableLines(file) {
+      const ext = getExt(file.name);
+      const token = COMMENT_TOKENS[ext] || '//';
+      const text = await file.text();
+      const lines = text.split('\n');
+      const candidates = [];
+      lines.forEach((line, i) => {
+        const s = line.trim();
+        if (s && !s.startsWith(token) && s.length > 5) candidates.push(i);
+      });
+      return { lines, candidates, token };
+    }
+
+    function toggleLine(lines, idx, commentOut, token) {
+      const line = lines[idx];
+      if (commentOut) {
+        const indent = line.length - line.trimStart().length;
+        return [...lines.slice(0, idx), line.slice(0, indent) + token + ' ' + line.slice(indent), ...lines.slice(idx + 1)];
+      } else {
+        const trimmed = line.trimStart();
+        const indent = line.length - trimmed.length;
+        const uncommented = trimmed.replace(new RegExp('^' + token.replace(/\//g,'\/') + '\\s?'), '');
+        return [...lines.slice(0, idx), line.slice(0, indent) + uncommented, ...lines.slice(idx + 1)];
+      }
+    }
+
+    // ── Components ────────────────────────────────────────────────────────────
+
+    function Cursor() {
+      return <span style={{
+        display: 'inline-block', width: 8, height: 16,
+        background: 'var(--accent)', marginLeft: 2, verticalAlign: 'middle',
+        animation: 'blink 1s step-end infinite'
+      }}/>;
+    }
+
+    function Badge({ children, color = 'accent' }) {
+      const colors = {
+        accent: { bg: 'var(--accent-dim)', border: 'rgba(127,255,110,0.3)', text: 'var(--accent)' },
+        red:    { bg: 'rgba(255,85,85,0.1)', border: 'rgba(255,85,85,0.3)', text: 'var(--red)' },
+        amber:  { bg: 'rgba(255,179,71,0.1)', border: 'rgba(255,179,71,0.3)', text: 'var(--amber)' },
+      };
+      const c = colors[color];
+      return (
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+          padding: '2px 10px', borderRadius: 4,
+          background: c.bg, border: `1px solid ${c.border}`,
+          color: c.text, fontSize: 11, fontFamily: 'var(--mono)',
+          fontWeight: 700, letterSpacing: '0.05em'
+        }}>{children}</span>
+      );
+    }
+
+    function Spinner() {
+      return (
+        <span style={{
+          display: 'inline-block', width: 14, height: 14,
+          border: '2px solid var(--border2)',
+          borderTopColor: 'var(--accent)',
+          borderRadius: '50%',
+          animation: 'spin 0.7s linear infinite',
+          flexShrink: 0
+        }}/>
+      );
+    }
+
+    function LogLine({ line, idx }) {
+      const icons = { success: '✓', error: '✗', info: '›', push: '↑', done: '★' };
+      const colors = {
+        success: 'var(--accent)', error: 'var(--red)',
+        info: 'var(--text2)', push: '#7eb8ff', done: 'var(--accent)',
+      };
+      return (
+        <div style={{
+          display: 'flex', gap: 10, alignItems: 'flex-start',
+          padding: '4px 0',
+          animation: `slide-in 0.2s ease ${idx * 0.03}s both`,
+          fontFamily: 'var(--mono)', fontSize: 12,
+          borderBottom: '1px solid rgba(255,255,255,0.03)',
+        }}>
+          <span style={{ color: colors[line.type] || 'var(--text2)', flexShrink: 0, width: 14 }}>
+            {icons[line.type] || '›'}
+          </span>
+          <span style={{ color: line.type === 'success' ? 'var(--text)' : line.type === 'error' ? 'var(--red)' : 'var(--text2)', lineHeight: 1.5 }}>
+            {line.text}
+          </span>
+          {line.time && (
+            <span style={{ marginLeft: 'auto', color: 'var(--text3)', flexShrink: 0, fontSize: 10 }}>
+              {line.time}
+            </span>
+          )}
+        </div>
+      );
+    }
+
+    function ContribGraph({ commits }) {
+      const total = 52 * 7;
+      const today = total - 1;
+      const filled = Math.min(commits, today);
+      const cells = Array.from({ length: total }, (_, i) => {
+        const daysFromToday = today - i;
+        if (daysFromToday < filled) {
+          const intensity = daysFromToday < 7 ? 4 : daysFromToday < 14 ? 3 : daysFromToday < 30 ? 2 : 1;
+          return intensity;
+        }
+        return 0;
+      });
+
+      const intensityColors = ['#1a1a24', '#1a4d1a', '#2d7a2d', '#3dab3d', '#7fff6e'];
+
+      return (
+        <div style={{ overflowX: 'auto', paddingBottom: 4 }}>
+          <div style={{ display: 'flex', gap: 3, minWidth: 'fit-content' }}>
+            {Array.from({ length: 52 }, (_, week) => (
+              <div key={week} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {Array.from({ length: 7 }, (_, day) => {
+                  const cellIdx = week * 7 + day;
+                  const level = cells[cellIdx];
+                  return (
+                    <div key={day} style={{
+                      width: 11, height: 11,
+                      borderRadius: 2,
+                      background: intensityColors[level],
+                      border: level > 0 ? '1px solid rgba(127,255,110,0.15)' : '1px solid rgba(255,255,255,0.04)',
+                      transition: 'background 0.3s',
+                    }}/>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    function StatCard({ label, value, sub, accent }) {
+      return (
+        <div style={{
+          background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: 10, padding: '16px 20px',
+          display: 'flex', flexDirection: 'column', gap: 4,
+          transition: 'border-color 0.2s',
+          ...(accent ? { borderColor: 'rgba(127,255,110,0.3)', boxShadow: '0 0 20px rgba(127,255,110,0.05)' } : {}),
+        }}>
+          <div style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--mono)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            {label}
+          </div>
+          <div style={{
+            fontSize: 32, fontWeight: 800, color: accent ? 'var(--accent)' : 'var(--text)',
+            fontFamily: 'var(--sans)', lineHeight: 1,
+            animation: 'count-up 0.3s ease',
+          }}>
+            {value}
+          </div>
+          {sub && <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>{sub}</div>}
+        </div>
+      );
+    }
+
+    // ── Main App ─────────────────────────────────────────────────────────────
+
+    function App() {
+      const [files, setFiles] = useState([]);
+      const [repoName, setRepoName] = useState('');
+      const [commits, setCommits] = useState(60);
+      const [delay, setDelay] = useState(300);
+      const [running, setRunning] = useState(false);
+      const [logs, setLogs] = useState([]);
+      const [stats, setStats] = useState({ done: 0, failed: 0, pushed: false });
+      const [totalCommitsEver, setTotalCommitsEver] = useState(0);
+      const [tab, setTab] = useState('run'); // 'run' | 'graph'
+      const logsEndRef = useRef(null);
+      const cancelRef = useRef(false);
+
+      useEffect(() => {
+        if (logsEndRef.current) logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      }, [logs]);
+
+      const addLog = useCallback((text, type = 'info', time) => {
+        setLogs(l => [...l, { text, type, time: time || new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) }]);
+      }, []);
+
+      async function handleFolderSelect(e) {
+        const selected = Array.from(e.target.files);
+        const codeFiles = selected.filter(f => {
+          const ext = getExt(f.name);
+          if (!SUPPORTED_EXTS.includes(ext)) return false;
+          const parts = f.webkitRelativePath.split('/');
+          return !parts.some(p => SKIP_DIRS.has(p));
+        });
+        setFiles(codeFiles);
+        if (codeFiles.length > 0) {
+          const folder = codeFiles[0].webkitRelativePath.split('/')[0];
+          setRepoName(folder);
+          setLogs([]);
+          setStats({ done: 0, failed: 0, pushed: false });
+        }
+      }
+
+      async function runPusher() {
+        if (files.length === 0) return;
+        cancelRef.current = false;
+        setRunning(true);
+        setLogs([]);
+        setStats({ done: 0, failed: 0, pushed: false });
+
+        addLog(`Starting GitPusher on "${repoName}"`, 'info');
+        addLog(`Found ${files.length} code file(s)`, 'info');
+        addLog(`Target: ${commits} commits`, 'info');
+
+        const state = {};
+        let successCount = 0;
+        let failCount = 0;
+
+        // Build a map of file → { lines, candidates, token }
+        const fileCache = {};
+
+        for (let i = 0; i < commits; i++) {
+          if (cancelRef.current) {
+            addLog('Cancelled by user.', 'error');
+            break;
+          }
+
+          // Shuffle files
+          const shuffled = [...files].sort(() => Math.random() - 0.5);
+          let chosen = null;
+          let chosenData = null;
+
+          for (const f of shuffled) {
+            if (!fileCache[f.name]) {
+              fileCache[f.name] = await getToggleableLines(f);
+            }
+            const data = fileCache[f.name];
+            if (data.candidates.length > 0) {
+              chosen = f;
+              chosenData = data;
+              break;
+            }
+          }
+
+          if (!chosen) {
+            addLog('No toggleable lines found — stopping.', 'error');
+            failCount++;
+            break;
+          }
+
+          const lineIdx = randomItem(chosenData.candidates);
+          const key = `${chosen.name}:${lineIdx}`;
+          const currentlyCommented = state[key] || false;
+          const newLines = toggleLine(chosenData.lines, lineIdx, !currentlyCommented, chosenData.token);
+          fileCache[chosen.name].lines = newLines;
+          state[key] = !currentlyCommented;
+
+          const action = !currentlyCommented ? 'commented' : 'uncommented';
+          const msg = randomItem(COMMIT_MESSAGES);
+          const shortPath = chosen.webkitRelativePath || chosen.name;
+
+          addLog(`[${i+1}/${commits}] ${action} line ${lineIdx+1} in ${shortPath.split('/').slice(-2).join('/')} → "${msg}"`, 'success');
+
+          successCount++;
+          setStats(s => ({ ...s, done: successCount }));
+
+          await sleep(delay);
+        }
+
+        if (successCount > 0) {
+          await sleep(200);
+          addLog(`↑ Pushing ${successCount} commits to GitHub...`, 'push');
+          await sleep(600);
+          addLog(`✓ Push complete! ${successCount} commits sent.`, 'done');
+          setStats(s => ({ ...s, pushed: true }));
+          setTotalCommitsEver(t => t + successCount);
+        }
+
+        setRunning(false);
+      }
+
+      function cancel() {
+        cancelRef.current = true;
+      }
+
+      const hasFiles = files.length > 0;
+      const isDone = !running && stats.done > 0;
+
+      return (
+        <div style={{ minHeight: '100vh', position: 'relative' }}>
+          <div className="grid-bg"/>
+
+          <div style={{ position: 'relative', zIndex: 1, maxWidth: 860, margin: '0 auto', padding: '40px 24px 80px' }}>
+
+            {/* Header */}
+            <div className="fade-up" style={{ marginBottom: 48 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 8,
+                  background: 'var(--accent-dim)', border: '1px solid rgba(127,255,110,0.3)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 18,
+                }}>⬡</div>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--text2)', letterSpacing: '0.1em' }}>
+                  GITPUSHER v1.0
+                </span>
+                <Badge>READY</Badge>
+              </div>
+              <h1 style={{
+                fontSize: 'clamp(32px, 6vw, 52px)', fontWeight: 800,
+                lineHeight: 1.05, color: 'var(--text)',
+                letterSpacing: '-0.02em',
+              }}>
+                Keep your graph<br/>
+                <span style={{ color: 'var(--accent)', textShadow: '0 0 40px rgba(127,255,110,0.3)' }}>green.</span>
+              </h1>
+              <p style={{ marginTop: 12, color: 'var(--text2)', fontSize: 15, maxWidth: 480, lineHeight: 1.6 }}>
+                Select your project folder, set how many commits you want, and push — your contribution graph fills up automatically.
+              </p>
+            </div>
+
+            {/* Tabs */}
+            <div style={{ display: 'flex', gap: 2, marginBottom: 24, background: 'var(--surface)', borderRadius: 8, padding: 4, width: 'fit-content', border: '1px solid var(--border)' }}>
+              {['run', 'graph'].map(t => (
+                <button key={t} onClick={() => setTab(t)} style={{
+                  padding: '6px 18px', borderRadius: 6, border: 'none',
+                  background: tab === t ? 'var(--surface2)' : 'transparent',
+                  color: tab === t ? 'var(--text)' : 'var(--text2)',
+                  fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                  cursor: 'pointer', transition: 'all 0.15s',
+                  boxShadow: tab === t ? '0 1px 4px rgba(0,0,0,0.4)' : 'none',
+                }}>
+                  {t === 'run' ? '⚡ Run' : '◼ Graph'}
+                </button>
+              ))}
+            </div>
+
+            {tab === 'run' && (
+              <div style={{ display: 'grid', gap: 16 }}>
+
+                {/* Folder picker */}
+                <div className="fade-up" style={{ animationDelay: '0.05s', background: 'var(--surface)', border: `1px solid ${hasFiles ? 'rgba(127,255,110,0.25)' : 'var(--border)'}`, borderRadius: 12, overflow: 'hidden', transition: 'border-color 0.3s' }}>
+                  <label style={{
+                    display: 'block', padding: '20px 24px', cursor: 'pointer',
+                    transition: 'background 0.15s',
+                  }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <input
+                      type="file"
+                      webkitdirectory="true"
+                      directory="true"
+                      multiple
+                      onChange={handleFolderSelect}
+                      style={{ display: 'none' }}
+                    />
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+                      <div>
+                        <div style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--mono)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>
+                          01 — Project Folder
+                        </div>
+                        <div style={{ fontSize: 15, fontWeight: 600, color: hasFiles ? 'var(--accent)' : 'var(--text)' }}>
+                          {hasFiles ? `/${repoName}` : 'Select your git repo folder'}
+                        </div>
+                        {hasFiles && (
+                          <div style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'var(--mono)', marginTop: 4 }}>
+                            {files.length} code file{files.length !== 1 ? 's' : ''} found ({SUPPORTED_EXTS.join(' ')})
+                          </div>
+                        )}
+                      </div>
+                      <div style={{
+                        flexShrink: 0, padding: '8px 16px',
+                        border: '1px solid var(--border2)', borderRadius: 8,
+                        color: 'var(--text2)', fontSize: 12,
+                        fontFamily: 'var(--mono)',
+                        background: 'var(--surface2)',
+                      }}>
+                        {hasFiles ? 'Change' : 'Browse →'}
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Settings row */}
+                <div className="fade-up" style={{ animationDelay: '0.1s', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  {/* Commits slider */}
+                  <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '20px 24px' }}>
+                    <div style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--mono)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 10 }}>
+                      02 — Commits
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 14 }}>
+                      <span style={{ fontSize: 40, fontWeight: 800, color: 'var(--accent)', lineHeight: 1 }}>{commits}</span>
+                      <span style={{ color: 'var(--text2)', fontSize: 13 }}>commits</span>
+                    </div>
+                    <input
+                      type="range" min="1" max="100" value={commits}
+                      onChange={e => setCommits(Number(e.target.value))}
+                      style={{ width: '100%', accentColor: 'var(--accent)', cursor: 'pointer', height: 4 }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 4 }}>
+                      <span>1</span><span>50</span><span>100</span>
+                    </div>
+                  </div>
+
+                  {/* Delay slider */}
+                  <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '20px 24px' }}>
+                    <div style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--mono)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 10 }}>
+                      03 — Delay
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 14 }}>
+                      <span style={{ fontSize: 40, fontWeight: 800, color: 'var(--text)', lineHeight: 1 }}>{delay}</span>
+                      <span style={{ color: 'var(--text2)', fontSize: 13 }}>ms</span>
+                    </div>
+                    <input
+                      type="range" min="100" max="2000" step="100" value={delay}
+                      onChange={e => setDelay(Number(e.target.value))}
+                      style={{ width: '100%', accentColor: 'var(--text2)', cursor: 'pointer', height: 4 }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 4 }}>
+                      <span>fast</span><span>↔</span><span>slow</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Run button */}
+                <div className="fade-up" style={{ animationDelay: '0.15s' }}>
+                  {!running ? (
+                    <button
+                      onClick={runPusher}
+                      disabled={!hasFiles}
+                      style={{
+                        width: '100%', padding: '18px 24px',
+                        background: hasFiles ? 'var(--accent)' : 'var(--surface)',
+                        border: hasFiles ? 'none' : '1px solid var(--border)',
+                        borderRadius: 12, cursor: hasFiles ? 'pointer' : 'not-allowed',
+                        color: hasFiles ? '#0a0a0f' : 'var(--text3)',
+                        fontSize: 16, fontWeight: 800,
+                        fontFamily: 'var(--sans)', letterSpacing: '-0.01em',
+                        transition: 'all 0.2s',
+                        animation: hasFiles ? 'pulse-ring 2.5s infinite' : 'none',
+                      }}
+                      onMouseEnter={e => hasFiles && (e.target.style.transform = 'translateY(-1px)')}
+                      onMouseLeave={e => e.target.style.transform = 'none'}
+                    >
+                      {isDone ? `↑ Run Again` : `⚡ Generate ${commits} Commits & Push`}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={cancel}
+                      style={{
+                        width: '100%', padding: '18px 24px',
+                        background: 'rgba(255,85,85,0.1)',
+                        border: '1px solid rgba(255,85,85,0.3)',
+                        borderRadius: 12, cursor: 'pointer',
+                        color: 'var(--red)',
+                        fontSize: 16, fontWeight: 800,
+                        fontFamily: 'var(--sans)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                      }}
+                    >
+                      <Spinner/> Running... (click to cancel)
+                    </button>
+                  )}
+                </div>
+
+                {/* Stats row */}
+                {(running || stats.done > 0) && (
+                  <div className="fade-up" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                    <StatCard label="Commits done" value={stats.done} accent={stats.done > 0}/>
+                    <StatCard label="Target" value={commits} sub="this run"/>
+                    <StatCard label="Pushed" value={stats.pushed ? 'YES' : 'NO'} accent={stats.pushed}/>
+                  </div>
+                )}
+
+                {/* Log console */}
+                {logs.length > 0 && (
+                  <div className="fade-up" style={{
+                    background: 'var(--surface)', border: '1px solid var(--border)',
+                    borderRadius: 12, overflow: 'hidden',
+                  }}>
+                    <div style={{
+                      padding: '12px 20px', borderBottom: '1px solid var(--border)',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      background: 'var(--surface2)',
+                    }}>
+                      <div style={{ display: 'flex', gap: 5 }}>
+                        {['#ff5f57','#ffbd2e','#28c840'].map(c => (
+                          <div key={c} style={{ width: 10, height: 10, borderRadius: '50%', background: c }}/>
+                        ))}
+                      </div>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text2)', marginLeft: 4 }}>
+                        git-pusher — {repoName}
+                      </span>
+                      {running && <Spinner/>}
+                    </div>
+                    <div style={{
+                      padding: '16px 20px', maxHeight: 280,
+                      overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2,
+                    }}>
+                      {logs.map((l, i) => <LogLine key={i} line={l} idx={i}/>)}
+                      {running && (
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                          <Spinner/> working<Cursor/>
+                        </div>
+                      )}
+                      <div ref={logsEndRef}/>
+                    </div>
+                  </div>
+                )}
+
+                {/* Important note */}
+                <div className="fade-up" style={{
+                  padding: '14px 18px', borderRadius: 10,
+                  background: 'rgba(255,179,71,0.06)', border: '1px solid rgba(255,179,71,0.2)',
+                  display: 'flex', gap: 10, alignItems: 'flex-start',
+                }}>
+                  <span style={{ color: 'var(--amber)', fontSize: 14, flexShrink: 0 }}>⚠</span>
+                  <div>
+                    <div style={{ fontSize: 12, color: 'var(--amber)', fontFamily: 'var(--mono)', fontWeight: 700, marginBottom: 4 }}>
+                      IMPORTANT — READ THIS
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.7 }}>
+                      This tool simulates the commit/push logic in your browser. To actually push to GitHub, you still need to run <code style={{ background: 'var(--surface2)', padding: '1px 5px', borderRadius: 4, color: 'var(--text)', fontFamily: 'var(--mono)' }}>git_pusher.py</code> from your terminal inside your repo. This app is a visual controller and preview — use the Python script for real commits.
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+            {tab === 'graph' && (
+              <div style={{ display: 'grid', gap: 16 }}>
+                <div className="fade-up" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '24px' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--mono)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 16 }}>
+                    Contribution preview
+                  </div>
+                  <ContribGraph commits={totalCommitsEver + stats.done}/>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>
+                    <span>Less</span>
+                    {['#1a1a24','#1a4d1a','#2d7a2d','#3dab3d','#7fff6e'].map(c => (
+                      <div key={c} style={{ width: 11, height: 11, borderRadius: 2, background: c, border: '1px solid rgba(255,255,255,0.06)' }}/>
+                    ))}
+                    <span>More</span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                  <StatCard label="Total commits" value={totalCommitsEver + stats.done} accent/>
+                  <StatCard label="Today" value={stats.done} sub="this session"/>
+                  <StatCard label="Streak" value={totalCommitsEver > 0 ? '🔥 Active' : '—'} />
+                </div>
+
+                <div className="fade-up" style={{
+                  padding: '16px 20px', borderRadius: 10,
+                  background: 'var(--surface)', border: '1px solid var(--border)',
+                }}>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--mono)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 12 }}>
+                    Quick guide — how to use
+                  </div>
+                  {[
+                    ['1', 'Put git_pusher.py inside your project repo folder'],
+                    ['2', 'Open Terminal, cd into your repo'],
+                    ['3', 'Run: python3 git_pusher.py --commits 60'],
+                    ['4', 'Do this a few times a day — watch the graph fill up'],
+                  ].map(([n, t]) => (
+                    <div key={n} style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', alignItems: 'flex-start' }}>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--accent)', background: 'var(--accent-dim)', padding: '2px 7px', borderRadius: 4, flexShrink: 0 }}>{n}</span>
+                      <span style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.5 }}>{t}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>
