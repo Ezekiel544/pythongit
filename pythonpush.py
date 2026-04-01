@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-git_pusher.py — Auto commit & push with comment toggling
+# git_pusher.py — Auto commit & push with comment toggling
 Usage: python3 pythonpush.py --commits N
 """
 
