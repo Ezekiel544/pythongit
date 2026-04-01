@@ -166,7 +166,7 @@ def main():
 
     for i in range(commits):
         print(f"[{i+1}/{commits}]")
-        if make_one_commit(repo_path, state):
+        # if make_one_commit(repo_path, state):
             success += 1
         if i < commits - 1:
             time.sleep(1.5)
