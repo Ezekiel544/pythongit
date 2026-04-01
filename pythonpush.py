@@ -176,7 +176,7 @@ def main():
     if success > 0:
         push(repo_path)
     else:
-        print("  ⚠️  Nothing to push.")
+        # print("  ⚠️  Nothing to push.")
 
     print("\n✨ Done!\n")
 
