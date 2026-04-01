@@ -162,7 +162,7 @@ def main():
     print(f"   Files   : {len(files)} code file(s)\n")
 
     state = {}
-    success = 0
+    # success = 0
 
     for i in range(commits):
         print(f"[{i+1}/{commits}]")
